@@ -5,12 +5,14 @@ import time
 import csv
 import math
 import os
+import HTMLParser
 
 class APIException(Exception):
     pass
 
 def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword):
 
+    parser = HTMLParser.HTMLParser()
     baseSearchUrl = "http://api.stackexchange.com/2.2/search/advanced"
     baseUserUrl = "http://api.stackexchange.com/2.2/users/"
 
@@ -22,7 +24,6 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
     searchPayload = {
         'pagesize' : 100,
         'page' : 1,
-        'fromdate' : startDate,
         'todate' : endDate,
         'order' : "desc",
         'sort' : "activity",
@@ -37,11 +38,14 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
         'site' : site
     }
 
+    # Unique question IDS list
+    question_ids = []
+    output = []
+
     for field in fields:
 
         # RESET VARIABLES
         previousField = None
-        output = []
         questions = []
         userIds = []
         searchPayload['page'] = 1
@@ -50,7 +54,7 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
         # Assign file name
         outputPath = r'output'
         if not os.path.exists(outputPath): os.makedirs(outputPath)
-        csvFile = outputPath + "/" + csvName + "_" + site + "_" + field +'.csv'
+        csvFile = outputPath + "/" + csvName + "_" + site + '.csv'
 
         # Perform Question Search
         print "Searching the ", site, " site for questions with", keyword, "in the ", field, "field \n"
@@ -59,7 +63,7 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
         if previousField:
             del searchPayload[previousField]
 
-        print "Search payload: ", searchPayload
+       # print "Search payload: ", searchPayload
         while moreQuestions:
             response = requests.get(baseSearchUrl, params=searchPayload)
             print "QUESTION REQUEST URL: ", response.url
@@ -87,38 +91,42 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
                 userIds.append(userId)
 
         numUserPages = int(math.ceil(float(len(userIds))/100))
-        print "userids len", len(userIds), "numUserPages",  numUserPages, math.ceil(numUserPages)
+        #print "userids len", len(userIds), "numUserPages",  numUserPages, math.ceil(numUserPages)
         userPages = split_list(userIds, numUserPages)
-       # print userPages
 
+        #Cycle through user pages and get all the user details
         for page in userPages:
-
             usersString = ";".join(page)
             #Get all the users from the API
-            users = requests.get(baseUserUrl + usersString, userPayload).json()["items"]
+            users += requests.get(baseUserUrl + usersString, userPayload).json()["items"]
 
-            for q in questions:
-                #Get the user, check if they have a location
-                user = get_question_user(q, users)
+        for q in questions:
+            #Get the user, check if they have a location
+            user = get_question_user(q, users)
+            if "question_id" not in question_ids:
+                question_ids.append(q['question_id'])
+                print "Question ID", q['question_id']
+            else:
+                break
 
-                # Filter users that don't have have a UK location
-                if user and len(filter(lambda l: l in user['location'], locs)):
-                    print "UK User: ", user["display_name"], user["location"]
+            # Filter users that don't have have a UK location
+            if user and len(filter(lambda l: l in user['location'], locs)):
+                #print "UK User: ", user["display_name"], user["location"]
 
-                    output.append(
-                              [
-                              q['title'],
-                              q['link'],
-                              time.strftime("%d/%m/%y", time.localtime(float(user['last_access_date'])) ),
-                              q['is_answered'],
-                              user['display_name'],
-                              user['link'],
-                              user['location'],
-                              user['reputation']
-                              ]
-                        )
+                output.append(
+                    map((lambda x: parser.unescape(x) if type(x) == str else x ),[
+                        q['title'],
+                        q['link'],
+                        time.strftime("%d/%m/%y", time.localtime(float(user['last_access_date']))),
+                        q['is_answered'],
+                        user['display_name'],
+                        user['link'],
+                        user['location'],
+                        user['reputation']
+                    ])
+                )
 
-        write_csv(csvFile, output)
+    write_csv(csvFile, output)
 
 
 def split_list(alist, parts=1):
