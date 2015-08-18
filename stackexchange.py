@@ -38,42 +38,49 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
         'site' : site
     }
 
-    # Unique question IDS list
-    question_ids = []
-    output = []
+    # Pre field iteration setup
+    question_ids = [] #Unique list of questions ids
+    output = [] # Ouput arrays for writing as rows
+    outputPath = r'output' # Assign output folder name
+    if not os.path.exists(outputPath): os.makedirs(outputPath) # If no directory make one
+    csvFile = outputPath + "/" + csvName + "_" + site + '.csv'
 
+    # Check if file is open first
+    try:
+        filetest = open(csvFile, "r+") # or "a+", whatever you need
+    except IOError:
+        print "Could not open file! Please close Excel or your spreadsheet software"
+
+    # Iterate through possible search fields - title, tagged, body
     for field in fields:
 
         # RESET VARIABLES
         previousField = None
         questions = []
         userIds = []
+        users = []
         searchPayload['page'] = 1
         userPayload['page'] = 1
 
-        # Assign file name
-        outputPath = r'output'
-        if not os.path.exists(outputPath): os.makedirs(outputPath)
-        csvFile = outputPath + "/" + csvName + "_" + site + '.csv'
-
         # Perform Question Search
         print "Searching the ", site, " site for questions with", keyword, "in the ", field, "field \n"
-        moreQuestions = True
         searchPayload[field] = keyword
         if previousField:
             del searchPayload[previousField]
 
-       # print "Search payload: ", searchPayload
+        # While more questions to be pulled from API
+        moreQuestions = True
         while moreQuestions:
             response = requests.get(baseSearchUrl, params=searchPayload)
             print "QUESTION REQUEST URL: ", response.url
             jsonResponse = response.json()
 
+
             if "error_id" not in jsonResponse and 'has_more' in jsonResponse:
-                moreQuestions = jsonResponse['has_more']
                 questions += jsonResponse["items"]
-                print len(questions), " questions in total, on page ", searchPayload['page'], "  any more? ",  moreQuestions
                 searchPayload['page'] += 1
+                print len(questions), " questions in total, on page ", searchPayload['page'], "  any more? ",  moreQuestions
+                moreQuestions = jsonResponse['has_more']
 
             if "error_id" in jsonResponse:
                 raise APIException("StackExchange API Error:", jsonResponse["error_message"])
@@ -82,7 +89,7 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
                 time.sleep( int(searchPayload['backoff']) +  1 )
 
             elif "backoff" not in jsonResponse:
-                time.sleep(0.1)
+                time.sleep(0.5)
 
         # Get users IDs from question
         for question in questions:
@@ -103,14 +110,14 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
         for q in questions:
             #Get the user, check if they have a location
             user = get_question_user(q, users)
-            if "question_id" not in question_ids:
+            if q['question_id'] not in question_ids:
                 question_ids.append(q['question_id'])
-                print "Question ID", q['question_id']
+                #print "Question ID", q['question_id']
             else:
                 break
 
             # Filter users that don't have have a UK location
-            if user and len(filter(lambda l: l in user['location'], locs)):
+            if user and located_user(user, locs):
                 #print "UK User: ", user["display_name"], user["location"]
 
                 output.append(
@@ -128,6 +135,8 @@ def checkStackExchange(csvName, fields, startDate, endDate, locs, site, keyword)
 
     write_csv(csvFile, output)
 
+def located_user(user, locs):
+    return len(filter(lambda l: l in user['location'], locs))
 
 def split_list(alist, parts=1):
     length = len(alist)
@@ -153,7 +162,7 @@ def write_csv(csvName, outputRows):
 
 if __name__ == "__main__":
 
-    site = 'stackoverflow' #gis
+    site = 'gis' #gis
     locs = ["United Kingdom", "UK", "England", "Wales", "Scotland", "Great Britain", "GB"]
     keyword = "arcgis"
     startDate = 1412121600
